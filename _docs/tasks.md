@@ -748,3 +748,444 @@ Constraints:
 - The test must be fully self-contained: seed data (tables), perform the journey, and assert outcomes — no shared mutable state from other tests
 - No new npm dependencies may be installed
 - Follow existing test conventions: `renderWithQuery` helper, `beforeEach` with `vi.clearAllMocks()`, `waitFor` for async DOM updates, descriptive `it()` strings
+
+---
+
+# Backend Backlog
+
+## 1. Scaffold FastAPI project with a passing test
+
+Goal: A `backend/` directory exists with a uv-managed Python project, FastAPI app structure, and one passing test.
+
+Description:
+Initialize the backend project using `uv` with FastAPI as the only dependency.
+Create the package structure (`app/__init__.py`, `app/main.py`, `tests/`) and a
+minimal FastAPI app that returns a 200 on `GET /health`. Write a single passing
+pytest test for it. The backend listens on port 5173 by default.
+
+Acceptance criteria:
+- [ ] `backend/` directory exists with `pyproject.toml` managed by `uv`
+- [ ] `uv run pytest` passes with at least one test
+- [ ] `uv run fastapi dev backend/app/main.py` starts the server on port 5173
+- [ ] `GET /health` returns `{"status": "ok"}` with HTTP 200
+- [ ] No other code or dependencies added yet
+
+Constraints:
+- Use Python 3.12+ and `uv` for dependency management
+- Use `pytest` as the test runner
+- Do not add any application logic yet — this is pure scaffolding
+- Port must be 5173 (the frontend's `VITE_API_BASE_URL` points here)
+
+---
+
+## 2. Define data models and Pydantic schemas
+
+Goal: All domain entities (Party, Table, ActionLog, Settings) are represented as dataclasses with matching Pydantic schemas for request/response validation.
+
+Description:
+Create `backend/app/models/` with dataclasses for the core entities and `backend/app/schemas/` with Pydantic v2 models for API serialization. Parties have id (UUID), name, party_size, phone, email, status (enum), position, estimated_wait, notes, urgent, token (NanoID), timestamps, and nullable completion times. Tables have id, capacity, label, is_occupied, occupied_by_party_id, and created_at. ActionLog records id, party_id, action, previous_state (JSON), created_by, created_at. Settings stores key-value pairs. Request schemas cover CreatePartyRequest, UpdatePartyRequest, CreateTableRequest, UpdateTableRequest, PinVerifyRequest, PinChangeRequest.
+
+Acceptance criteria:
+- [ ] `backend/app/models/__init__.py` exports Party, Table, ActionLog, AppSettings dataclasses
+- [ ] `backend/app/schemas/__init__.py` exports all Pydantic request/response schemas
+- [ ] `PartyStatus` enum includes: waiting, notified, seated, canceled, no_show
+- [ ] All timestamp fields are `datetime` with `default_factory=datetime.now(timezone.utc)`
+- [ ] `token` field is `str | None` (nullable NanoID for guest links)
+- [ ] `previous_state` in ActionLog is `str | None` (JSON-serialized snapshot)
+- [ ] Every schema has proper field validators (party_size 1–12, capacity 1–20, pin digits only)
+- [ ] `uv run pytest` still passes (no regression)
+- [ ] `uv run pyright backend/` or `uv run mypy backend/` type-checks clean
+
+Constraints:
+- Use `dataclasses` from the standard library, not SQLAlchemy (in-memory store)
+- Use Pydantic v2 (`model_validator`, `field_validator`) for schema validation
+- Do not import or reference any database library
+- Keep schemas minimal — no business logic in schemas
+
+---
+
+## 3. Build the in-memory store
+
+Goal: A thread-safe in-memory data store that holds all parties, tables, action logs, settings, and auth tokens, with CRUD operations for each entity.
+
+Description:
+Create `backend/app/store/memory.py` containing a `MemoryStore` class. It holds: `parties` dict (id → Party), `tables` dict (id → Table), `action_logs` list, `settings` dict (key → value), `pins` dict (pin_hash → valid), `auth_tokens` dict (token_str → set of permissions/scopes), and `waitlist_paused` bool. Provide methods: `add_party()`, `get_party()`, `list_parties()`, `update_party()`, `delete_party()`, `get_party_by_token()`, `add_action_log()`, `get_action_logs_for_party()`, `add_table()`, `get_tables()`, `update_table()`, `delete_table()`, `get_setting()`, `set_setting()`, `add_token()`, `remove_token()`, `clear()`. Each party gets a UUID and a NanoID token on creation. Tables are created unoccupied. The store is a singleton accessible via a module-level instance.
+
+Acceptance criteria:
+- [ ] `MemoryStore` class exists in `backend/app/store/memory.py`
+- [ ] `add_party()` generates a UUID id and a NanoID token, sets status to `waiting`, timestamps to now
+- [ ] `list_parties()` returns parties sorted by position (ascending), with position auto-assigned on creation
+- [ ] `get_party_by_token(token)` returns the party or None
+- [ ] `update_party(id, updates)` applies partial updates and updates `updated_at`
+- [ ] `delete_party(id)` removes the party; returns None if not found
+- [ ] `add_action_log()` records an entry with party_id, action name, previous_state (JSON snapshot), created_by, timestamp
+- [ ] `get_action_logs_for_party(id)` returns logs for that party ordered by created_at desc
+- [ ] `add_table()` generates UUID, defaults is_occupied=False
+- [ ] `get_tables()` returns all tables
+- [ ] `update_table(id, updates)` applies partial updates
+- [ ] `delete_table(id)` removes the table
+- [ ] `set_setting(key, value)` and `get_setting(key)` work for arbitrary key-value pairs
+- [ ] `add_token(token, scopes)` and `remove_token(token)` manage auth tokens
+- [ ] `clear()` resets all data (used in tests)
+- [ ] Store is importable as `from app.store.memory import store` (module-level singleton)
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Use `uuid.uuid4()` for IDs and `nanoid` for guest tokens (install `nanoid` via uv)
+- Use `threading.Lock` for thread safety (FastAPI async may use multiple tasks)
+- Snapshot previous_state as JSON string for undo support
+- No persistence to disk — data resets on server restart
+- Do not create any router endpoints in this task
+
+---
+
+## 5. Implement authentication: PIN hashing, bearer tokens, and dependencies
+
+Goal: The backend can verify a 4–8 digit PIN, issue a short-lived bearer token, and protect endpoints with a FastAPI dependency that validates the token.
+
+Description:
+Create `backend/app/auth/` with two modules. `manager.py` provides `hash_pin(pin: str) -> str` using bcrypt, `verify_pin(stored_hash: str, pin: str) -> bool`, `generate_token() -> str` (UUID-based), and `revoke_token(token: str)`. `dependencies.py` provides `get_current_user_token(authorization: str = Header(...)) -> str` FastAPI dependency that checks the token against the store's `auth_tokens`, and `require_manager()` that combines token validation with a scope check. The default PIN for development is "1234" (hashed once and stored in the store). Token lifetime is 24 hours. All auth functions are pure (no side effects on the store except token add/remove).
+
+Acceptance criteria:
+- [ ] `hash_pin("1234")` produces a bcrypt hash that `verify_pin(hash, "1234")` returns True for
+- [ ] `verify_pin(hash, "wrong")` returns False
+- [ ] `generate_token()` returns a non-empty string
+- [ ] `get_current_user_token` dependency raises `HTTPException(401)` for missing or invalid tokens
+- [ ] `require_manager` dependency raises `HTTPException(403)` for valid token without manager scope
+- [ ] Token is added to store on verify success and removed on revoke
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Install `passlib[bcrypt]` and `python-multipart` via uv
+- Do not add any router endpoints in this task
+- The token is a simple string stored in-memory; no JWT needed
+- PIN hashes are stored in the settings store under key `"manager_pin_hash"`
+
+---
+
+## 4. Seed the store with realistic test data
+
+Goal: The in-memory store is populated with sample parties, tables, and settings so the frontend displays meaningful data on first load.
+
+Description:
+Create `backend/seed.py` that populates the `MemoryStore` with: 5–8 parties at various statuses (waiting, notified, seated), 6 tables across capacities (2-top × 2, 4-top × 2, 6-top × 1, 8-top × 1), a default manager PIN hash (for "1234"), avg_turnover_time=30, waitlist_paused=False, and a few action logs to demonstrate the undo feature. The seed must be idempotent (safe to run multiple times). Import the store singleton, clear it, then insert data. Provide a `seed()` function and a `if __name__ == "__main__":` entry point.
+
+Acceptance criteria:
+- [ ] `backend/seed.py` imports the store and calls `store.clear()` then inserts data
+- [ ] At least 3 parties in `waiting` status with names, party sizes, phone numbers
+- [ ] At least 1 party in `notified` status
+- [ ] At least 1 party in `seated` status
+- [ ] At least 6 tables covering capacities 2, 4, 6, and 8
+- [ ] Default PIN "1234" is hashed and stored via `store.set_setting("manager_pin_hash", ...)`
+- [ ] `avg_turnover_time` setting defaults to 30
+- [ ] `waitlist_paused` defaults to False
+- [ ] Running `uv run seed.py` completes without errors
+- [ ] After seeding, `GET /api/waitlist` (once the router exists) would return the seeded data
+- [ ] Running seed twice does not duplicate data
+
+Constraints:
+- Use `bcrypt` to hash the PIN "1234" (install via uv)
+- Use `datetime.now(timezone.utc)` for timestamps
+- Keep the seed data small and deterministic (same names, sizes, capacities every run)
+- Do not create any router endpoints in this task
+---
+
+## 6. Build the waitlist router (CRUD + undo + guest endpoints)
+
+Goal: All waitlist endpoints from the OpenAPI spec are implemented: list, create, update, delete, undo, and the three guest-facing token endpoints.
+
+Description:
+Create `backend/app/routers/waitlist.py`. Endpoints: `GET /api/waitlist` returns all parties sorted by position with calculated estimated_wait; `POST /api/waitlist` creates a party via the store; `PATCH /api/waitlist/{id}` updates a party with status transition validation (waiting->notified/canceled/no_show, notified->seated/canceled/no_show); `DELETE /api/waitlist/{id}` removes a party and logs the action; `POST /api/waitlist/{id}/undo` restores the party from the last action log entry; `GET /api/waitlist/token/{token}` returns a party by guest token or 404; `POST /api/waitlist/token/{token}/confirm` resets the party's notified_at or updates wait estimate; `POST /api/waitlist/token/{token}/cancel` cancels the party by token. Each mutating action writes an ActionLog entry. Estimated wait is calculated as `parties_ahead * avg_turnover_time`.
+
+Acceptance criteria:
+- [ ] `GET /api/waitlist` returns parties sorted ascending by position
+- [ ] `POST /api/waitlist` creates a party with UUID, NanoID token, status=waiting, timestamps
+- [ ] `PATCH /api/waitlist/{id}` with status "notified" on a waiting party succeeds and returns the updated party
+- [ ] `PATCH /api/waitlist/{id}` with invalid transition (e.g. seated->waiting) returns HTTP 409
+- [ ] `DELETE /api/waitlist/{id}` returns 204 and removes the party from the store
+- [ ] `POST /api/waitlist/{id}/undo` restores the party to its previous state from the action log
+- [ ] `POST /api/waitlist/{id}/undo` on a party with no action log returns HTTP 409
+- [ ] `GET /api/waitlist/token/{token}` returns the party when token exists, 404 otherwise
+- [ ] `POST /api/waitlist/token/{token}/confirm` returns the updated party
+- [ ] `POST /api/waitlist/token/{token}/cancel` sets status to canceled and returns the party
+- [ ] Every mutating endpoint writes an ActionLog entry via the store
+- [ ] Estimated wait is calculated and included in the response
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Register the router in `app/main.py` under prefix `/api/waitlist`
+- Status transitions must be enforced: only allow waiting->{notified,canceled,no_show}, notified->{seated,canceled,no_show}
+- Undo restores the exact previous state snapshot from ActionLog
+- Estimated wait formula: len(parties_ahead) * avg_turnover_time where parties_ahead are waiting/notified parties before this one
+- Do not add WebSocket code in this task
+
+---
+
+## 7. Build the tables router (CRUD)
+
+Goal: Table listing, creation, update, and deletion endpoints are implemented. Creation and deletion require manager authentication.
+
+Description:
+Create `backend/app/routers/tables.py`. Endpoints: `GET /api/tables` returns all tables (no auth required); `POST /api/tables` creates a table via the store (requires manager token); `PATCH /api/tables/{id}` updates a table's capacity, label, is_occupied, or occupied_by_party_id (no auth required for occupy/clear); `DELETE /api/tables/{id}` removes a table (requires manager token). When a table is marked occupied, it must be linked to a party_id. When cleared, occupied_by_party_id is set to null.
+
+Acceptance criteria:
+- [ ] `GET /api/tables` returns all tables without requiring authentication
+- [ ] `POST /api/tables` creates a table with UUID, defaults is_occupied=False, requires manager token
+- [ ] `POST /api/tables` without a valid token returns HTTP 401
+- [ ] `PATCH /api/tables/{id}` updates is_occupied and occupied_by_party_id
+- [ ] `DELETE /api/tables/{id}` removes the table, requires manager token
+- [ ] `DELETE /api/tables/{id}` without a valid token returns HTTP 401
+- [ ] `DELETE /api/tables/{id}` for a non-existent table returns HTTP 404
+- [ ] Occupying a table links it to a party_id; clearing unlinks it
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Register the router under prefix `/api/tables`
+- Reuse the `require_manager` auth dependency from Task 5 for create/delete
+- Do not add any notification logic in this task
+
+---
+
+## 8. Build the settings router (PIN verify/change, config)
+
+Goal: PIN verification, PIN change, average turnover time, and waitlist pause state endpoints are implemented. PIN change requires the current PIN.
+
+Description:
+Create `backend/app/routers/settings.py`. Endpoints: `POST /api/settings/pin` verifies a PIN against the stored hash and returns `{valid: true/false}`; on success it also issues a bearer token in the response body; `PATCH /api/settings/pin` changes the PIN after validating the current PIN; `GET /api/settings/avg-turnover-time` returns the current turnover time in minutes (default 30); `PATCH /api/settings/avg-turnover-time` updates it (requires manager token, must be 1-120); `GET /api/settings/waitlist-paused` returns the pause boolean; `PATCH /api/settings/waitlist-paused` toggles it (requires manager token). Settings are persisted in the MemoryStore.
+
+Acceptance criteria:
+- [ ] `POST /api/settings/pin` with correct PIN returns `{"valid": true, "token": "..."}`
+- [ ] `POST /api/settings/pin` with wrong PIN returns `{"valid": false}` and HTTP 200
+- [ ] `PATCH /api/settings/pin` with correct current PIN and new PIN updates the hash and returns 204
+- [ ] `PATCH /api/settings/pin` with wrong current PIN returns HTTP 401
+- [ ] `GET /api/settings/avg-turnover-time` returns a number (default 30)
+- [ ] `PATCH /api/settings/avg-turnover-time` with value 45 and valid token updates and returns 204
+- [ ] `PATCH /api/settings/avg-turnover-time` with value 0 returns HTTP 422
+- [ ] `PATCH /api/settings/avg-turnover-time` without token returns HTTP 401
+- [ ] `GET /api/settings/waitlist-paused` returns a boolean
+- [ ] `PATCH /api/settings/waitlist-paused` with token toggles and returns 204
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Register the router under prefix `/api/settings`
+- The token from `POST /api/settings/pin` must be a valid bearer token accepted by the auth dependency
+- PIN change re-hashes the new PIN with bcrypt
+- Do not add any notification or reporting logic in this task
+
+---
+
+## 9. Build the reports router
+
+Goal: The daily report endpoint calculates and returns statistics: total parties, average wait time, no-show rate, and seat utilization.
+
+Description:
+Create `backend/app/routers/reports.py`. Endpoint: `GET /api/reports/daily` returns a `DailyReportResponse` with date (today), total_parties (count of all parties ever created), average_wait_minutes (mean of seated parties' wait times, or 0 if none), no_show_rate (no_show count / total count, or 0), and seat_utilization (occupied tables / total tables, or 0). The calculation reads directly from the in-memory store. This endpoint requires manager authentication.
+
+Acceptance criteria:
+- [ ] `GET /api/reports/daily` returns all five fields: date, total_parties, average_wait_minutes, no_show_rate, seat_utilization
+- [ ] With seeded data, total_parties equals the number of parties in the store
+- [ ] no_show_rate is a float between 0 and 1
+- [ ] seat_utilization is a float between 0 and 1
+- [ ] Without a valid manager token, the endpoint returns HTTP 401
+- [ ] When the store is empty, all numeric fields return 0
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Register the router under prefix `/api/reports`
+- Reuse the `require_manager` auth dependency
+- Date should be ISO 8601 date string (YYYY-MM-DD) for today
+- average_wait_minutes should be rounded to 1 decimal place
+
+---
+
+## 10. Wire up the FastAPI app: routers, lifespan, CORS, WebSocket
+
+Goal: The FastAPI application ties together all routers, configures CORS for the frontend dev server, starts the WebSocket connection manager on lifespan, and seeds data on startup.
+
+Description:
+Update `backend/app/main.py` to import and include all four routers under `/api`. Configure CORS to allow the frontend origin (`http://localhost:4827`). Add a lifespan context manager that seeds the store on startup and starts the WebSocket manager. The WebSocket endpoint lives at `/ws/waitlist` and broadcasts a `{"type": "waitlist_update"}` JSON message to all connected clients whenever any party or table changes. The app should start on port 5173.
+
+Acceptance criteria:
+- [ ] `GET /api/waitlist` works through the full app (not just the router in isolation)
+- [ ] `GET /api/tables` works
+- [ ] `GET /api/settings/pin` works
+- [ ] `GET /api/reports/daily` requires auth and returns 401 without token
+- [ ] CORS headers are present on responses (Allow-Origin: http://localhost:4827)
+- [ ] On startup, the store is seeded with test data
+- [ ] `ws://localhost:5173/ws/waitlist` accepts a WebSocket connection
+- [ ] Broadcasting a waitlist_update message connects to the store's change events
+- [ ] `uv run pytest` passes
+- [ ] `uv run pyright backend/` type-checks clean
+
+Constraints:
+- Use FastAPI's `lifespan` parameter (not the deprecated `on_event`)
+- The WebSocket manager should track connected clients in a set and broadcast on any mutation
+- Use `websockets` library (install via uv) for the WebSocket server
+- Do not add any business logic -- this task is purely wiring
+
+---
+
+## 11. Write unit tests for the waitlist router
+
+Goal: Every waitlist endpoint is covered by tests: CRUD, status transitions, undo, guest token endpoints, and error cases.
+
+Description:
+Create `backend/tests/test_waitlist.py`. Use FastAPI's `TestClient` with the app from `app.main`. Tests should cover: list parties, create a party, update party status through valid transitions, reject invalid transitions with 409, delete a party, undo an action, get party by token, guest confirm, guest cancel, 404 on missing party, 422 on invalid request body. Reset the store in a fixture or setup_function before each test.
+
+Acceptance criteria:
+- [ ] Test: `GET /api/waitlist` returns a list
+- [ ] Test: `POST /api/waitlist` creates a party and returns it with status "waiting"
+- [ ] Test: `PATCH /api/waitlist/{id}` with status "notified" on a waiting party succeeds
+- [ ] Test: `PATCH /api/waitlist/{id}` with status "waiting" on a notified party returns 409
+- [ ] Test: `DELETE /api/waitlist/{id}` returns 204
+- [ ] Test: `POST /api/waitlist/{id}/undo` restores previous state
+- [ ] Test: `GET /api/waitlist/token/{token}` returns the party
+- [ ] Test: `POST /api/waitlist/token/{token}/confirm` returns updated party
+- [ ] Test: `POST /api/waitlist/token/{token}/cancel` sets status to canceled
+- [ ] Test: 404 when party ID does not exist
+- [ ] Test: 422 when request body is invalid (e.g. party_size=0)
+- [ ] All 11 tests pass with `uv run pytest`
+- [ ] Store is reset between tests
+
+Constraints:
+- Use `pytest` fixtures for app and store cleanup
+- Use `httpx` (already available via FastAPI TestClient) for requests
+- Do not test WebSocket in this file
+
+---
+
+## 12. Write unit tests for tables and settings routers
+
+Goal: Table CRUD and settings (PIN, config) endpoints are fully tested, including auth gating.
+
+Description:
+Create `backend/tests/test_tables.py` and `backend/tests/test_settings.py`. Table tests cover: list tables (no auth), create table (requires auth -> 401 without token), update table (occupy/clear), delete table (requires auth). Settings tests cover: verify correct PIN returns token, verify wrong PIN returns invalid, change PIN with correct current PIN, change PIN with wrong current PIN returns 401, get/set avg_turnover_time, get/set waitlist_paused. Use `TestClient` with the real app. Generate a valid token via the PIN verify endpoint and reuse it for protected requests.
+
+Acceptance criteria:
+- [ ] `test_tables.py`: GET returns tables without auth
+- [ ] `test_tables.py`: POST without token returns 401
+- [ ] `test_tables.py`: POST with valid token creates a table
+- [ ] `test_tables.py`: PATCH updates is_occupied and occupied_by_party_id
+- [ ] `test_tables.py`: DELETE without token returns 401
+- [ ] `test_tables.py`: DELETE with token removes the table
+- [ ] `test_settings.py`: POST /api/settings/pin with "1234" returns valid=true and a token
+- [ ] `test_settings.py`: POST /api/settings/pin with wrong PIN returns valid=false
+- [ ] `test_settings.py`: PATCH /api/settings/pin with correct current PIN succeeds
+- [ ] `test_settings.py`: PATCH /api/settings/pin with wrong current PIN returns 401
+- [ ] `test_settings.py`: GET /api/settings/avg-turnover-time returns a number
+- [ ] `test_settings.py`: PATCH /api/settings/avg-turnover-time with valid token updates
+- [ ] `test_settings.py`: PATCH /api/settings/avg-turnover-time out of range returns 422
+- [ ] `test_settings.py`: GET /api/settings/waitlist-paused returns a boolean
+- [ ] `test_settings.py`: PATCH /api/settings/waitlist-paused with token toggles
+- [ ] All tests pass with `uv run pytest`
+- [ ] Store is reset between tests
+
+Constraints:
+- Split into two test files: `test_tables.py` and `test_settings.py`
+- Reuse the token obtained from the PIN verify endpoint for protected requests
+- Do not test WebSocket in these files
+
+---
+
+## 13. Write unit tests for reports and auth
+
+Goal: Report calculations and auth token lifecycle are tested end-to-end through the HTTP layer.
+
+Description:
+Create `backend/tests/test_reports.py` and `backend/tests/test_auth.py`. Reports tests verify: daily stats are calculated correctly from seeded data (total_parties, average_wait_minutes, no_show_rate, seat_utilization), empty store returns all zeros, auth is required. Auth tests verify: token generation via PIN verify, token rejection after revocation, expired token handling (tokens older than 24h are rejected), direct store token manipulation is rejected.
+
+Acceptance criteria:
+- [ ] `test_reports.py`: GET /api/reports/daily returns correct total_parties from seeded data
+- [ ] `test_reports.py`: no_show_rate is calculated correctly
+- [ ] `test_reports.py`: seat_utilization is calculated correctly
+- [ ] `test_reports.py`: unauthenticated request returns 401
+- [ ] `test_auth.py`: valid PIN returns a token
+- [ ] `test_auth.py`: revoked token is rejected (401)
+- [ ] `test_auth.py`: token older than 24h is rejected
+- [ ] All tests pass with `uv run pytest`
+- [ ] Store is reset between tests
+
+Constraints:
+- Use `TestClient` with the real app
+- For expiry testing, manipulate the stored token's created_at timestamp directly
+- Do not test WebSocket in these files
+
+---
+
+## 14. Write integration test: full host journey through the API
+
+Goal: A single end-to-end test exercises the complete host workflow through the real HTTP API: add party -> notify -> seat with table -> undo.
+
+Description:
+Create `backend/tests/test_integration.py`. The test uses `TestClient` against the real app with the seeded store. It performs: (1) GET waitlist to see seeded list, (2) POST to add a new party, (3) GET to confirm the party appears, (4) PATCH to notify the party, (5) POST tables to create a table, (6) PATCH table to occupy it, (7) PATCH party to seat it with the table ID, (8) GET reports to verify stats updated, (9) POST undo on the seat action, (10) GET to verify the party is no longer seated. Assert each step's response status and body.
+
+Acceptance criteria:
+- [ ] Test adds a party and asserts it appears in the waitlist
+- [ ] Test notifies the party and asserts status changed to "notified"
+- [ ] Test creates a table and seats the party on it
+- [ ] Test asserts the party status is now "seated" and the table is occupied
+- [ ] Test calls undo on the seat action and asserts the party is back to "notified"
+- [ ] Test calls GET /api/reports/daily and asserts total_parties increased
+- [ ] Test uses the manager PIN to obtain a token and reuses it for all protected calls
+- [ ] All assertions pass
+- [ ] `uv run pytest` passes
+
+Constraints:
+- Use the real app, not mocked services
+- Reset the store before the test via a fixture
+- Use `pytest` parametrize or sequential steps (not separate test functions)
+- Do not test WebSocket in this file
+
+---
+
+## 15. Write WebSocket connection and broadcast tests
+
+Goal: The WebSocket endpoint is tested: connections are accepted, messages are broadcast on store mutations, and clients disconnect cleanly.
+
+Description:
+Create `backend/tests/test_ws.py`. Use the `websockets` library's test client or `httpx` with WebSocket support to test the `/ws/waitlist` endpoint. Tests should cover: (1) connecting to the WebSocket succeeds, (2) after a waitlist mutation (via HTTP), a `waitlist_update` message is broadcast to all connected clients, (3) closing the WebSocket cleans up the client list. Use `asyncio` fixtures for async test setup.
+
+Acceptance criteria:
+- [ ] Test: client can connect to `ws://localhost:5173/ws/waitlist`
+- [ ] Test: after connecting, a party creation via HTTP triggers a `waitlist_update` message received by the WS client
+- [ ] Test: multiple connected clients all receive the broadcast
+- [ ] Test: after client disconnects, it is removed from the client set
+- [ ] `uv run pytest` passes
+- [ ] Store is reset between tests
+
+Constraints:
+- Use `pytest-asyncio` for async test fixtures (install via uv)
+- The WebSocket URL is configured in the app; tests should connect to the test server
+- Use `anyio` or `websockets` test utilities for async WebSocket testing
+
+---
+
+## 16. Add start script and ensure frontend-backend integration works
+
+Goal: A `start.ps1` script at the repository root launches both the backend (port 5173) and frontend (port 4827) together, and the frontend renders real data from the backend instead of mock services.
+
+Description:
+Create `start.ps1` at the repository root that starts the FastAPI backend in the background on port 5173, waits for it to be ready (poll `/health`), then starts the Vite frontend on port 4827. Both processes are tracked by PID so they can be stopped together. Update the frontend `.env` to remove `VITE_USE_MOCK=true` so it hits the real backend. Verify that `npm run dev` in the frontend connects to `http://localhost:5173` and that the waitlist displays seeded data.
+
+Acceptance criteria:
+- [ ] `start.ps1` exists at the repository root
+- [ ] Running `start.ps1` starts both backend and frontend
+- [ ] Backend is reachable at `http://localhost:5173/health` before frontend starts
+- [ ] Frontend is reachable at `http://localhost:4827`
+- [ ] Frontend displays seeded party data from the backend (not mock data)
+- [ ] The HostView shows at least one party in the waitlist
+- [ ] Adding a party via the frontend form creates it in the backend store
+- [ ] `uv run pytest` in backend still passes
+- [ ] `npm run test` in frontend still passes
+
+Constraints:
+- The start script should work on Windows (PowerShell)
+- Kill any existing processes on ports 5173 and 4827 before starting
+- Track child PIDs for clean shutdown
+- Do not use default ports (3000, 8000) -- use the assigned 5173/4827
