@@ -753,7 +753,7 @@ Constraints:
 
 # Backend Backlog
 
-## 1. Scaffold FastAPI project with a passing test
+## 21. Scaffold FastAPI project with a passing test
 
 Goal: A `backend/` directory exists with a uv-managed Python project, FastAPI app structure, and one passing test.
 
@@ -778,7 +778,7 @@ Constraints:
 
 ---
 
-## 2. Define data models and Pydantic schemas
+## 22. Define data models and Pydantic schemas
 
 Goal: All domain entities (Party, Table, ActionLog, Settings) are represented as dataclasses with matching Pydantic schemas for request/response validation.
 
@@ -804,7 +804,7 @@ Constraints:
 
 ---
 
-## 3. Build the in-memory store
+## 23. Build the in-memory store
 
 Goal: A thread-safe in-memory data store that holds all parties, tables, action logs, settings, and auth tokens, with CRUD operations for each entity.
 
@@ -840,7 +840,7 @@ Constraints:
 
 ---
 
-## 5. Implement authentication: PIN hashing, bearer tokens, and dependencies
+## 24. Implement authentication: PIN hashing, bearer tokens, and dependencies
 
 Goal: The backend can verify a 4–8 digit PIN, issue a short-lived bearer token, and protect endpoints with a FastAPI dependency that validates the token.
 
@@ -865,7 +865,7 @@ Constraints:
 
 ---
 
-## 4. Seed the store with realistic test data
+## 25. Seed the store with realistic test data
 
 Goal: The in-memory store is populated with sample parties, tables, and settings so the frontend displays meaningful data on first load.
 
@@ -892,7 +892,7 @@ Constraints:
 - Do not create any router endpoints in this task
 ---
 
-## 6. Build the waitlist router (CRUD + undo + guest endpoints)
+## 26. Build the waitlist router (CRUD + undo + guest endpoints)
 
 Goal: All waitlist endpoints from the OpenAPI spec are implemented: list, create, update, delete, undo, and the three guest-facing token endpoints.
 
@@ -924,7 +924,7 @@ Constraints:
 
 ---
 
-## 7. Build the tables router (CRUD)
+## 27. Build the tables router (CRUD)
 
 Goal: Table listing, creation, update, and deletion endpoints are implemented. Creation and deletion require manager authentication.
 
@@ -950,7 +950,7 @@ Constraints:
 
 ---
 
-## 8. Build the settings router (PIN verify/change, config)
+## 28. Build the settings router (PIN verify/change, config)
 
 Goal: PIN verification, PIN change, average turnover time, and waitlist pause state endpoints are implemented. PIN change requires the current PIN.
 
@@ -979,7 +979,7 @@ Constraints:
 
 ---
 
-## 9. Build the reports router
+## 29. Build the reports router
 
 Goal: The daily report endpoint calculates and returns statistics: total parties, average wait time, no-show rate, and seat utilization.
 
@@ -1004,7 +1004,7 @@ Constraints:
 
 ---
 
-## 10. Wire up the FastAPI app: routers, lifespan, CORS, WebSocket
+## 30. Wire up the FastAPI app: routers, lifespan, CORS, WebSocket
 
 Goal: The FastAPI application ties together all routers, configures CORS for the frontend dev server, starts the WebSocket connection manager on lifespan, and seeds data on startup.
 
@@ -1031,7 +1031,7 @@ Constraints:
 
 ---
 
-## 11. Write unit tests for the waitlist router
+## 31. Write unit tests for the waitlist router
 
 Goal: Every waitlist endpoint is covered by tests: CRUD, status transitions, undo, guest token endpoints, and error cases.
 
@@ -1060,7 +1060,7 @@ Constraints:
 
 ---
 
-## 12. Write unit tests for tables and settings routers
+## 32. Write unit tests for tables and settings routers
 
 Goal: Table CRUD and settings (PIN, config) endpoints are fully tested, including auth gating.
 
@@ -1093,7 +1093,7 @@ Constraints:
 
 ---
 
-## 13. Write unit tests for reports and auth
+## 33. Write unit tests for reports and auth
 
 Goal: Report calculations and auth token lifecycle are tested end-to-end through the HTTP layer.
 
@@ -1118,7 +1118,7 @@ Constraints:
 
 ---
 
-## 14. Write integration test: full host journey through the API
+## 34. Write integration test: full host journey through the API
 
 Goal: A single end-to-end test exercises the complete host workflow through the real HTTP API: add party -> notify -> seat with table -> undo.
 
@@ -1144,7 +1144,7 @@ Constraints:
 
 ---
 
-## 15. Write WebSocket connection and broadcast tests
+## 35. Write WebSocket connection and broadcast tests
 
 Goal: The WebSocket endpoint is tested: connections are accepted, messages are broadcast on store mutations, and clients disconnect cleanly.
 
@@ -1166,7 +1166,7 @@ Constraints:
 
 ---
 
-## 16. Add start script and ensure frontend-backend integration works
+## 36. Add start script and ensure frontend-backend integration works
 
 Goal: A `start.ps1` script at the repository root launches both the backend (port 5173) and frontend (port 4827) together, and the frontend renders real data from the backend instead of mock services.
 
