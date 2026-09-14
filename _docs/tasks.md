@@ -5,7 +5,7 @@ All tasks live inside the `frontend/` directory.
 
 ---
 
- REMOVED_PLACEHOLDER_21 Scaffold React project with a passing test ✅
+## 1. Scaffold React project with a passing test ✅
 
 Goal: A Vite + React + TypeScript project lives in `frontend/`, builds without errors, starts a dev server on a non-default port, and has at least one passing test.
 
@@ -36,7 +36,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_22 Define TypeScript types for the entire API ✅
+## 2. Define TypeScript types for the entire API ✅
 
 Goal: `frontend/src/types/index.ts` exports TypeScript interfaces for every entity and request/response shape the frontend needs, matching the backend schema in `_docs/plan.md` Phase 1.
 
@@ -68,7 +68,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_23 Create the services layer interface ✅
+## 3. Create the services layer interface ✅
 
 Goal: `frontend/src/services/api.ts` exports typed async functions for every REST endpoint so the rest of the frontend can call the API without worrying about fetch details.
 
@@ -107,7 +107,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_24 Implement the mock services layer ✅
+## 4. Implement the mock services layer ✅
 
 Goal: The frontend can run entirely without a backend by using in-memory fake data that behaves identically to the real API, enabling UI development and testing against realistic data flows.
 
@@ -149,7 +149,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_25 Set up Zustand store and React Query provider ✅
+## 5. Set up Zustand store and React Query provider ✅
 
 Goal: The app is wired with Zustand for client-side UI state and TanStack Query for server-state plumbing, so that subsequent tasks can build pages that read/write UI state and fetch data through React Query hooks.
 
@@ -187,7 +187,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_26 Build the Waitlist page with mock data ✅
+## 6. Build the Waitlist page with mock data ✅
 
 Goal: A host can view a styled, mobile-first waitlist showing all current parties with their position, name, party size, masked phone, estimated wait, status badge, and urgent flag — all fed by mock data via TanStack Query.
 
@@ -227,7 +227,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_27 Build the Add Party form ✅
+## 7. Build the Add Party form ✅
 
 Goal: A host can add a new party to the waitlist by filling out a form with name and party size (required) plus optional contact details. On submit the form calls the mock service, the waitlist refreshes, and the form resets.
 
@@ -266,7 +266,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_28 Build Party action buttons ✅
+## 8. Build Party action buttons ✅
 
 Goal: Every party row in the HostView shows Notify, Seat, Cancel, and Mark Urgent buttons that perform valid status transitions, disable themselves for impossible actions, refresh the list, and record undo history.
 
@@ -305,7 +305,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_29 Build the Table Selection modal ✅
+## 9. Build the Table Selection modal ✅
 
 Goal: When a host clicks Seat on a notified party, a modal opens showing available tables grouped by capacity. The host selects a table, which gets marked occupied, linked to the party, and the party transitions to Seated status.
 
@@ -341,7 +341,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_210 Build the Undo bar ✅
+## 10. Build the Undo bar ✅
 
 Goal: A toast/snackbar appears at the bottom of the screen after each party action (notify, seat, cancel, urgent), showing what happened and providing an Undo button that reverses the change.
 
@@ -375,7 +375,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_211 Build the Pause/Resume toggle ✅
+## 11. Build the Pause/Resume toggle ✅
 
 Goal: A host can pause the waitlist from the HostView header to stop accepting new parties. When paused, the Add Party form is hidden and a "Waitlist Paused" banner is displayed. Resuming restores normal behavior.
 
@@ -414,7 +414,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_212 Build the Guest Status page ✅
+## 12. Build the Guest Status page ✅
 
 Goal: A guest can view their position, confirm they are waiting, or cancel from a mobile-optimized page accessed via a shareable link (`/status/{token}`) with no authentication required.
 
@@ -449,7 +449,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_213 Build the Manager PIN modal ✅ ✅
+## 13. Build the Manager PIN modal ✅ ✅
 
 Goal: A manager can enter a 4-digit PIN via a modal to unlock manager-only features. The modal is triggered from the HostView header, validates against the mock `verifyPin` service (PIN `"1234"`), sets `isManager=true` in Zustand on success, shows an error with shake animation on failure, and locks the input for 30 seconds after 5 consecutive wrong attempts.
 
@@ -491,7 +491,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_214 Build the Manager Settings page ✅
+## 14. Build the Manager Settings page ✅
 
 Goal: A manager can view and manage restaurant tables, change their access PIN, and adjust the average table turnover time on a protected `/settings` page; non-managers are redirected to the host view.
 
@@ -546,7 +546,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_215 Build the Reports page ✅
+## 15. Build the Reports page ✅
 
 Goal: A manager can navigate to `/reports` and see daily waitlist statistics (total parties, avg wait time, no-show rate, seat utilization) in stat cards and a bar chart rendered with Recharts, plus working CSV and PDF export buttons.
 
@@ -581,7 +581,7 @@ Constraints:
 
 ---
 
- REMOVED_PLACEHOLDER_216 Integrate WebSocket for real-time sync ✅
+## 16. Integrate WebSocket for real-time sync ✅
 
 Goal: After mounting HostView, the app opens a WebSocket connection to the configured endpoint and keeps it alive with exponential backoff; when a `"waitlist_update"` message arrives, React Query's `['waitlist']` cache is invalidated so all open tabs see the latest data instantly, and a small status dot in the header shows connected/disconnected.
 
