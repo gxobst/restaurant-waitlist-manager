@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException
 
-from app.store.memory import store
+from app.store import store
 
 
 def get_current_user_token(authorization: Annotated[str, Header(...)]) -> str:
@@ -13,8 +13,8 @@ def get_current_user_token(authorization: Annotated[str, Header(...)]) -> str:
     return token
 
 
-def require_manager(token: Annotated[str, Depends(get_current_user_token)]) -> None:
-    stored = store.get_token(token)
+async def require_manager(token: Annotated[str, Depends(get_current_user_token)]) -> None:
+    stored = await store.get_token(token)
     if stored is None:
         raise HTTPException(status_code=401, detail="Token not found")
     now = datetime.now(timezone.utc)
@@ -29,7 +29,7 @@ def require_manager(token: Annotated[str, Depends(get_current_user_token)]) -> N
         else:
             token_created = datetime.fromisoformat(str(created_at_raw)).replace(tzinfo=timezone.utc)
         if now - token_created > timedelta(hours=24):
-            store.remove_token(token)
+            await store.remove_token(token)
             raise HTTPException(status_code=401, detail="Token expired")
     scopes = stored.get("scopes", [])
     if not isinstance(scopes, list) or "manager" not in scopes:

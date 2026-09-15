@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.auth.dependencies import require_manager
 from app.models import PartyStatus
 from app.schemas import DailyReportResponse
-from app.store.memory import store
+from app.store import store
 
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 
@@ -18,8 +18,8 @@ async def daily_report(
     today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
     today_end = datetime(today.year, today.month, today.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
 
-    parties = store.list_parties()
-    tables = store.get_tables()
+    parties = await store.list_parties()
+    tables = await store.get_tables()
 
     today_parties = [
         p for p in parties

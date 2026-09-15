@@ -5,16 +5,17 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import waitlist, tables, settings, reports
-from app.store.memory import store
+from app.store import store
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    store.clear()
+    await store._ensure_tables()
+    await store.clear()
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
-    store.set_setting("avg_turnover_time", "30")
-    store.set_setting("waitlist_paused", "false")
+    await store.set_setting("manager_pin_hash", hash_pin("1234"))
+    await store.set_setting("avg_turnover_time", "30")
+    await store.set_setting("waitlist_paused", "false")
     yield
 
 

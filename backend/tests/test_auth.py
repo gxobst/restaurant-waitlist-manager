@@ -1,16 +1,17 @@
+import asyncio
 from fastapi.testclient import TestClient
 from app.main import app
-from app.store.memory import store
+from app.store import store
 
 client = TestClient(app)
 
 
 def setup_function():
-    store.clear()
+    asyncio.run(store.clear())
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
-    store.set_setting("avg_turnover_time", "30")
-    store.set_setting("waitlist_paused", "false")
+    asyncio.run(store.set_setting("manager_pin_hash", hash_pin("1234")))
+    asyncio.run(store.set_setting("avg_turnover_time", "30"))
+    asyncio.run(store.set_setting("waitlist_paused", "false"))
 
 
 def test_verify_pin_creates_token():
@@ -20,7 +21,7 @@ def test_verify_pin_creates_token():
     assert data["valid"] is True
     assert data["token"] is not None
     token = data["token"]
-    assert store.get_token(token) is not None
+    assert asyncio.run(store.get_token(token)) is not None
 
 
 def test_invalid_pin_no_token():
@@ -31,9 +32,9 @@ def test_invalid_pin_no_token():
 def test_token_lifecycle():
     resp = client.post("/api/settings/pin", json={"pin": "1234"})
     token = resp.json()["token"]
-    assert store.get_token(token) is not None
-    store.remove_token(token)
-    assert store.get_token(token) is None
+    assert asyncio.run(store.get_token(token)) is not None
+    asyncio.run(store.remove_token(token))
+    assert asyncio.run(store.get_token(token)) is None
 
 
 def test_token_used_for_protected_endpoint():
@@ -49,7 +50,7 @@ def test_token_used_for_protected_endpoint():
 def test_token_rejected_when_removed():
     resp = client.post("/api/settings/pin", json={"pin": "1234"})
     token = resp.json()["token"]
-    store.remove_token(token)
+    asyncio.run(store.remove_token(token))
     resp = client.get(
         "/api/reports/daily",
         headers={"Authorization": f"Bearer {token}"},

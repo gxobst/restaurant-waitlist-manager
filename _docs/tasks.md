@@ -1189,3 +1189,199 @@ Constraints:
 - Kill any existing processes on ports 5173 and 4827 before starting
 - Track child PIDs for clean shutdown
 - Do not use default ports (3000, 8000) -- use the assigned 5173/4827
+
+---
+
+## 34. Install SQLAlchemy async dependencies ✅
+
+Goal: Add `sqlalchemy[asyncio]`, `aiosqlite`, and `alembic` to `backend/pyproject.toml` so the project can use async SQLite with migration support.
+
+Acceptance criteria:
+- [ ] `sqlalchemy[asyncio]>=2.0.0` added to `[project].dependencies` in `pyproject.toml`
+- [ ] `aiosqlite>=0.19.0` added to `[project].dependencies` in `pyproject.toml`
+- [ ] `alembic>=1.13.0` added to `[project].dependencies` in `pyproject.toml`
+- [ ] `uv sync` completes without errors
+- [ ] `import sqlalchemy` and `import aiosqlite` succeed in a Python REPL
+- [ ] `import alembic` succeeds in a Python REPL
+
+Out of scope:
+- Creating any models or migrations yet — this task is dependency installation only
+- Removing existing dependencies
+
+Constraints:
+- Do not remove any existing dependencies from `pyproject.toml`
+- Use exact versions or lower bounds as specified
+- `uv sync` must pass on a clean checkout
+
+---
+
+## 35. Create SQLAlchemy async database models ✅
+
+Goal: Replace the dataclass-based `Party`, `Table`, `ActionLog`, and `AppSettings` models with SQLAlchemy 2.0 async declarative base models in `backend/app/models/database.py`.
+
+Acceptance criteria:
+- [ ] `backend/app/models/database.py` exists with an async `DeclarativeBase` (not `registry()`)
+- [ ] `Party` table maps to `parties` with columns: `id` (UUID primary key), `name`, `party_size`, `phone`, `email`, `status` (String enum), `position`, `estimated_wait`, `notes`, `urgent`, `token`, `created_at`, `updated_at`, `notified_at`, `seated_at`, `canceled_at`
+- [ ] `Table` table maps to `tables` with columns: `id` (UUID primary key), `capacity`, `label`, `is_occupied`, `occupied_by_party_id` (nullable FK to parties.id), `created_at`
+- [ ] `ActionLog` table maps to `action_logs` with columns: `id` (UUID primary key), `party_id`, `action`, `previous_state` (nullable text), `created_by`, `created_at`
+- [ ] `AppSettings` table maps to `settings` with columns: `key` (primary key), `value`
+- [ ] All datetime columns use `server_default=func.now()` and `onupdate=func.now()` where appropriate
+- [ ] `Party.status` uses a Python `Enum` mapped to String (waiting, notified, seated, canceled, no_show)
+- [ ] `Party` model has a relationship to `ActionLog` (back_populates) and `Table` has a foreign key to `Party`
+- [ ] `uv run pytest` still passes (no regression from model changes)
+- [ ] `uv run pyright backend/` type-checks clean
+
+Out of scope:
+- Any store implementation — deferred to Task 37
+- Any router changes — deferred to Task 38
+- Migration creation — deferred to Task 36
+
+Constraints:
+- File: `backend/app/models/database.py` only (do not replace the dataclass models in `models/__init__.py` yet)
+- Use `sqlalchemy.orm.Mapped`, `MappedAsDataclass`, or plain declarative — no `MappedAsDataclass` unless already imported
+- Keep the existing dataclass models in `models/__init__.py` unchanged
+- UUID columns should use `UUID(as_uuid=True)` with Python `uuid.UUID`
+- Use `datetime.timezone.utc` as default factory for timestamps where `server_default` is not used
+
+---
+
+## 36. Set up Alembic and initial migration ✅
+
+Goal: Initialize Alembic for version-controlled schema migrations and create the initial migration that creates all tables defined in Task 35.
+
+Acceptance criteria:
+- [ ] `backend/alembic.ini` exists at the backend root
+- [ ] `backend/alembic/` directory exists with `versions/` subdirectory
+- [ ] `backend/alembic/env.py` is configured for async SQLAlchemy (uses `asyncio` runner)
+- [ ] `backend/alembic/script.py.mako` is present
+- [ ] `backend/alembic.ini` points to `app.models.database` for `target_metadata`
+- [ ] `alembic revision --autogenerate -m "initial schema"` creates a migration file
+- [ ] The generated migration creates all 4 tables: `parties`, `tables`, `action_logs`, `settings`
+- [ ] `alembic upgrade head` applies the migration successfully against a SQLite file
+- [ ] `alembic current` reports the correct revision after upgrade
+- [ ] `alembic downgrade -1` and `alembic upgrade head` work correctly (round-trip)
+
+Out of scope:
+- Any data migration — this is a fresh project
+- Any runtime migration logic in the app — migrations are run manually or via startup script
+
+Constraints:
+- Use async Alembic configuration in `env.py`
+- The SQLite database file should be at `backend/data/waitlist.db` (created on first migration)
+- Do not commit the `.db` file — add it to `.gitignore` if not already present
+
+---
+
+## 37. Create database-backed store replacing MemoryStore ✅
+
+Goal: Create `backend/app/store/database.py` with a `DatabaseStore` class that implements the same interface as `MemoryStore` but persists all data to SQLite via SQLAlchemy async session. Update `backend/app/store/__init__.py` to export the new store as `store`.
+
+Acceptance criteria:
+- [ ] `backend/app/store/database.py` exists with a `DatabaseStore` class
+- [ ] `DatabaseStore` implements all methods from `MemoryStore`: `add_party`, `get_party`, `list_parties`, `update_party`, `delete_party`, `get_party_by_token`, `add_action_log`, `get_action_logs_for_party`, `add_table`, `get_tables`, `get_table`, `update_table`, `delete_table`, `set_setting`, `get_setting`, `add_token`, `remove_token`, `get_token`, `clear`
+- [ ] `DatabaseStore` uses an async `AsyncSession` for all database operations
+- [ ] A module-level singleton `store = DatabaseStore()` is exported from `database.py`
+- [ ] `backend/app/store/__init__.py` exports the new `store` (replacing the memory import)
+- [ ] The store connects to `sqlite+aiosqlite:///data/waitlist.db`
+- [ ] `add_party` generates UUID id and NanoID token, assigns position, sets timestamps
+- [ ] `list_parties` returns parties sorted by position ascending
+- [ ] `undo_last_action` is NOT part of the store interface (routers handle it directly) — but the method name should match memory store for compatibility
+- [ ] `clear()` drops and recreates all tables (for testing)
+- [ ] All methods are `async` (since they use async sessions)
+- [ ] `uv run pytest` passes with all existing tests (routers updated in Task 38 first)
+
+Out of scope:
+- Connection pooling configuration beyond defaults
+- Database connection string via environment variable — hardcode for now
+- Background jobs or APScheduler integration
+
+Constraints:
+- Import the SQLAlchemy models from `app.models.database`
+- Use `async with async_session_maker() as session:` pattern for all operations
+- Use `await session.execute(...)` for all queries
+- Use `await session.commit()` after mutations
+- Do not break the existing `from app.store import store` import path
+- The `UndoLastAction` logic stays in the router (waitlist.py) — the store just provides the data access
+
+---
+
+## 38. Update routers to use the new async store ✅
+
+Goal: Update all router files (`waitlist.py`, `tables.py`, `settings.py`, `reports.py`) to call async store methods properly, since the new `DatabaseStore` uses async/await throughout.
+
+Acceptance criteria:
+- [ ] `backend/app/routers/waitlist.py` awaits all `store.*` calls
+- [ ] `backend/app/routers/tables.py` awaits all `store.*` calls
+- [ ] `backend/app/routers/settings.py` awaits all `store.*` calls
+- [ ] `backend/app/routers/reports.py` awaits all `store.*` calls
+- [ ] The `main.py` lifespan properly initializes the database (creates tables if not exist)
+- [ ] `uv run pytest` passes all backend tests
+- [ ] `uv run pyright backend/` type-checks clean
+- [ ] No `SyntaxError` or `RuntimeError` from missing `await` on coroutine calls
+
+Out of scope:
+- Changing endpoint signatures or response schemas
+- Adding new endpoints
+- WebSocket changes
+
+Constraints:
+- Only add `await` where needed — do not refactor unrelated code
+- Keep the same API contract (same paths, same request/response shapes)
+- The database should auto-create tables on startup if they don't exist (use `AsyncEngine` with `create_all`)
+
+---
+
+## 39. Update tests for the database store ✅
+
+Goal: Update all backend tests to work with the async `DatabaseStore`. Fix any test failures caused by the store switch, and add tests specifically for the database store's behavior.
+
+Acceptance criteria:
+- [ ] `backend/tests/test_store.py` updated to use the new `DatabaseStore` (or a fixture that switches stores)
+- [ ] `backend/tests/test_waitlist.py` passes with the async store
+- [ ] `backend/tests/test_tables.py` passes with the async store
+- [ ] `backend/tests/test_settings.py` passes with the async store
+- [ ] `backend/tests/test_reports.py` passes with the async store
+- [ ] `backend/tests/test_integration.py` passes with the async store
+- [ ] `backend/tests/test_auth.py` passes with the async store
+- [ ] `backend/tests/test_ws.py` passes with the async store
+- [ ] `uv run pytest` reports all tests green
+- [ ] Store is properly reset between tests (use `clear()` in setup)
+
+Out of scope:
+- New test coverage for database-specific edge cases (future task)
+- Performance benchmarks
+
+Constraints:
+- Use FastAPI's `TestClient` with the real app — no store mocking in these tests
+- Tests must be async-compatible (pytest-asyncio if needed for async fixtures)
+- `setup_function` / `setup_module` should reset the database before each test
+
+---
+
+## 40. Verify end-to-end with real frontend ✅
+
+Goal: Start both backend and frontend together, confirm the frontend renders real data from the SQLite-backed backend (not mock data), and all CRUD operations work through the real API.
+
+Acceptance criteria:
+- [ ] Backend starts on port 5173 and `/health` returns `{"status": "ok"}`
+- [ ] Frontend starts on port 4827
+- [ ] `GET /api/waitlist` returns an empty list on first run (no seeded data)
+- [ ] Adding a party via the frontend form creates it in the SQLite database
+- [ ] The party appears in the HostView after refresh
+- [ ] Notifying a party updates its status in the database
+- [ ] Seating a party updates status and links a table in the database
+- [ ] Undo restores the party state from the action log in the database
+- [ ] Table creation and deletion persist across server restarts
+- [ ] Settings (PIN, avg_turnover_time, waitlist_paused) persist across server restarts
+- [ ] `uv run pytest` in backend still passes
+- [ ] `npm run test` in frontend still passes
+- [ ] `npm run typecheck` passes with zero errors
+
+Out of scope:
+- Data seeding on first run (optional future improvement)
+- Database backup script
+
+Constraints:
+- The frontend must use `VITE_USE_MOCK=false` (or unset) to hit the real backend
+- The SQLite database file must survive server restarts
+- No mock data should appear in the UI during verification

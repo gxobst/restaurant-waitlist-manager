@@ -1,16 +1,17 @@
+import asyncio
 from fastapi.testclient import TestClient
 from app.main import app
-from app.store.memory import store
+from app.store import store
 
 client = TestClient(app)
 
 
 def setup_function():
-    store.clear()
+    asyncio.run(store.clear())
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
-    store.set_setting("avg_turnover_time", "30")
-    store.set_setting("waitlist_paused", "false")
+    asyncio.run(store.set_setting("manager_pin_hash", hash_pin("1234")))
+    asyncio.run(store.set_setting("avg_turnover_time", "30"))
+    asyncio.run(store.set_setting("waitlist_paused", "false"))
 
 
 def test_verify_pin_correct():
@@ -52,9 +53,9 @@ def test_change_pin_wrong_current():
 
 
 def test_get_avg_turnover_time_default():
-    store.clear()
+    asyncio.run(store.clear())
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
+    asyncio.run(store.set_setting("manager_pin_hash", hash_pin("1234")))
     resp = client.get("/api/settings/avg-turnover-time")
     assert resp.status_code == 200
     assert resp.json() == 30
@@ -75,9 +76,9 @@ def test_set_avg_turnover_time_out_of_range():
 
 
 def test_get_waitlist_paused_default():
-    store.clear()
+    asyncio.run(store.clear())
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
+    asyncio.run(store.set_setting("manager_pin_hash", hash_pin("1234")))
     resp = client.get("/api/settings/waitlist-paused")
     assert resp.status_code == 200
     assert resp.json() is False

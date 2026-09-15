@@ -4,16 +4,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connected_clients
-from app.store.memory import store
+from app.store import store
 
 
 @pytest.fixture(autouse=True)
 def clean_store():
-    store.clear()
+    asyncio.run(store.clear())
     from app.auth.manager import hash_pin
-    store.set_setting("manager_pin_hash", hash_pin("1234"))
-    store.set_setting("avg_turnover_time", "30")
-    store.set_setting("waitlist_paused", "false")
+    asyncio.run(store.set_setting("manager_pin_hash", hash_pin("1234")))
+    asyncio.run(store.set_setting("avg_turnover_time", "30"))
+    asyncio.run(store.set_setting("waitlist_paused", "false"))
     connected_clients.clear()
     yield
     connected_clients.clear()

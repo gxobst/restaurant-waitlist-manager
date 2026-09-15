@@ -18,22 +18,22 @@ def _table_to_response(table):
 
 
 @router.get("", response_model=list[TableResponse])
-def list_tables():
-    tables = store.get_tables()
+async def list_tables():
+    tables = await store.get_tables()
     return [_table_to_response(t) for t in tables]
 
 
 @router.post("", response_model=TableResponse, status_code=201)
-def create_table(body: CreateTableRequest):
-    table = store.add_table(body.capacity, body.label)
+async def create_table(body: CreateTableRequest):
+    table = await store.add_table(body.capacity, body.label)
     return _table_to_response(table)
 
 
 @router.patch("/{table_id}", response_model=TableResponse)
-def update_table(table_id: str, body: UpdateTableRequest):
+async def update_table(table_id: str, body: UpdateTableRequest):
     from uuid import UUID
     table_uuid = UUID(table_id)
-    table = store.get_table(table_uuid)
+    table = await store.get_table(table_uuid)
     if table is None:
         raise HTTPException(status_code=404, detail="Table not found")
 
@@ -47,18 +47,18 @@ def update_table(table_id: str, body: UpdateTableRequest):
     if body.occupied_by_party_id is not None:
         updates["occupied_by_party_id"] = body.occupied_by_party_id
 
-    updated = store.update_table(table_uuid, updates)
+    updated = await store.update_table(table_uuid, updates)
     if updated is None:
         raise HTTPException(status_code=404, detail="Table not found")
     return _table_to_response(updated)
 
 
 @router.delete("/{table_id}", status_code=204)
-def delete_table(table_id: str):
+async def delete_table(table_id: str):
     from uuid import UUID
     table_uuid = UUID(table_id)
-    table = store.get_table(table_uuid)
+    table = await store.get_table(table_uuid)
     if table is None:
         raise HTTPException(status_code=404, detail="Table not found")
-    store.delete_table(table_uuid)
+    await store.delete_table(table_uuid)
     return None
