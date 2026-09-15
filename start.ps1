@@ -57,8 +57,8 @@ Write-Log "Starting backend on port $backendPort..."
 $backendProcess = Start-Process -FilePath "uv" -ArgumentList "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $backendPort, "--reload" `
     -WorkingDirectory $backendDir `
     -PassThru `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $logFile `
+    -RedirectStandardOutput $backendLog `
+    -RedirectStandardError $backendLog `
     -NoNewWindow
 
 $backendPid = $backendProcess.Id
@@ -98,8 +98,8 @@ Write-Log "Starting frontend on port $frontendPort..."
 $frontendProcess = Start-Process -FilePath "npm" -ArgumentList "run", "dev" `
     -WorkingDirectory $frontendDir `
     -PassThru `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $logFile `
+    -RedirectStandardOutput $frontendLog `
+    -RedirectStandardError $frontendLog `
     -NoNewWindow
 
 $frontendPid = $frontendProcess.Id
