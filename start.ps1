@@ -12,6 +12,8 @@ $logFile = Join-Path $env:TEMP "restaurant-waitlist-manager-$(Get-Date -Format '
 
 $backendPid = $null
 $frontendPid = $null
+$backendLog = Join-Path $env:TEMP "backend-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$frontendLog = Join-Path $env:TEMP "frontend-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
 function Write-Log {
     param([string]$Message)
@@ -108,7 +110,7 @@ Write-Log "Services running:"
 Write-Log "  Backend:  http://localhost:$backendPort"
 Write-Log "  Frontend: http://localhost:$frontendPort"
 Write-Log "  Health:   http://localhost:$backendPort/health"
-Write-Log "  Log:      $logFile"
+Write-Log "  Log:      $backendLog, $frontendLog"
 Write-Log ""
 Write-Log "Press Ctrl+C to stop all services"
 
