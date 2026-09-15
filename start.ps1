@@ -56,12 +56,10 @@ Write-Log "Log file: $logFile"
 
 # Start backend
 Write-Log "Starting backend on port $backendPort..."
-$backendProcess = Start-Process -FilePath "uv" -ArgumentList "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $backendPort, "--reload" `
+$backendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $backendPort, "--reload" `
     -WorkingDirectory $backendDir `
     -PassThru `
-    -RedirectStandardOutput $backendLogOut `
-    -RedirectStandardError $backendLogErr `
-    -NoNewWindow
+    -WindowStyle Hidden
 
 $backendPid = $backendProcess.Id
 Write-Log "Backend started (PID $backendPid)"
@@ -97,12 +95,10 @@ if (-not $backendReady) {
 
 # Start frontend
 Write-Log "Starting frontend on port $frontendPort..."
-$frontendProcess = Start-Process -FilePath "npm" -ArgumentList "run", "dev" `
+$frontendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm", "run", "dev" `
     -WorkingDirectory $frontendDir `
     -PassThru `
-    -RedirectStandardOutput $frontendLogOut `
-    -RedirectStandardError $frontendLogErr `
-    -NoNewWindow
+    -WindowStyle Hidden
 
 $frontendPid = $frontendProcess.Id
 Write-Log "Frontend started (PID $frontendPid)"
