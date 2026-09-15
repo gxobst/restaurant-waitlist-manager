@@ -75,8 +75,8 @@ $backendReady = $false
 while ($retryCount -lt $maxRetries) {
     Start-Sleep -Seconds 1
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
-        if ($response.StatusCode -eq 200) {
+        $response = curl -s -m 2 "http://localhost:$backendPort/health"
+        if ($response -match '"ok"') {
             $backendReady = $true
             Write-Log "Backend is ready"
             break
