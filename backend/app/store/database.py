@@ -210,6 +210,9 @@ class DatabaseStore:
                 "canceled_at": party.canceled_at.isoformat() if party.canceled_at else None,
             }
             prev.update(defaults)
+            # Convert status string back to enum
+            if isinstance(prev.get("status"), str):
+                prev["status"] = PartyStatus(prev["status"])
             restored = Party(**prev)
             # Ensure restored.id is a UUID
             if isinstance(restored.id, str):
