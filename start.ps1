@@ -12,8 +12,10 @@ $logFile = Join-Path $env:TEMP "restaurant-waitlist-manager-$(Get-Date -Format '
 
 $backendPid = $null
 $frontendPid = $null
-$backendLog = Join-Path $env:TEMP "backend-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-$frontendLog = Join-Path $env:TEMP "frontend-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$backendLogOut = Join-Path $env:TEMP "backend-out-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$backendLogErr = Join-Path $env:TEMP "backend-err-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$frontendLogOut = Join-Path $env:TEMP "frontend-out-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$frontendLogErr = Join-Path $env:TEMP "frontend-err-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
 function Write-Log {
     param([string]$Message)
@@ -57,8 +59,8 @@ Write-Log "Starting backend on port $backendPort..."
 $backendProcess = Start-Process -FilePath "uv" -ArgumentList "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $backendPort, "--reload" `
     -WorkingDirectory $backendDir `
     -PassThru `
-    -RedirectStandardOutput $backendLog `
-    -RedirectStandardError $backendLog `
+    -RedirectStandardOutput $backendLogOut `
+    -RedirectStandardError $backendLogErr `
     -NoNewWindow
 
 $backendPid = $backendProcess.Id
@@ -98,8 +100,8 @@ Write-Log "Starting frontend on port $frontendPort..."
 $frontendProcess = Start-Process -FilePath "npm" -ArgumentList "run", "dev" `
     -WorkingDirectory $frontendDir `
     -PassThru `
-    -RedirectStandardOutput $frontendLog `
-    -RedirectStandardError $frontendLog `
+    -RedirectStandardOutput $frontendLogOut `
+    -RedirectStandardError $frontendLogErr `
     -NoNewWindow
 
 $frontendPid = $frontendProcess.Id
@@ -110,7 +112,7 @@ Write-Log "Services running:"
 Write-Log "  Backend:  http://localhost:$backendPort"
 Write-Log "  Frontend: http://localhost:$frontendPort"
 Write-Log "  Health:   http://localhost:$backendPort/health"
-Write-Log "  Log:      $backendLog, $frontendLog"
+Write-Log "  Logs:     $backendLogOut, $backendLogErr, $frontendLogOut, $frontendLogErr"
 Write-Log ""
 Write-Log "Press Ctrl+C to stop all services"
 
