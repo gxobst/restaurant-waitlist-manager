@@ -215,7 +215,7 @@ describe('useWebSocket', () => {
 
     renderWithQuery(queryClient)
 
-    expect(capturedWs!.url).toBe('ws://localhost:51737')
+    expect(capturedWs!.url).toBe('ws://localhost:5173')
 
     capturedWs!.onclose!()
     vi.unstubAllEnvs()
