@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     CheckConstraint,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -11,7 +12,6 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -35,7 +35,7 @@ class Party(Base):
     party_size: Mapped[int] = mapped_column(nullable=False)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(
+    status: Mapped[PartyStatus] = mapped_column(
         Enum(PartyStatus, values_callable=lambda e: [s.value for s in e]),
         nullable=False,
         default=PartyStatus.waiting,
@@ -94,7 +94,11 @@ class ActionLog(Base):
     __tablename__ = "action_logs"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    party_id: Mapped[str] = mapped_column(String(36), ForeignKey("parties.id", ondelete="CASCADE"), nullable=False)
+    party_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("parties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     previous_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(50), default="system")

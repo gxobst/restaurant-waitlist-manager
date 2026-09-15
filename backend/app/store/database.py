@@ -1,47 +1,56 @@
-import asyncio
 import json
-import os
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
-import aiosqlite
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models.database import ActionLog, AppSettings, Base, Party, PartyStatus, Table
-from app.store.memory import MemoryStore
+from app.models.database import ActionLog, AppSettings, AuthToken, Base, Party, PartyStatus, Table
 
-# Use in-memory database for tests, file-based for production
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "sqlite+aiosqlite:///data/waitlist.db"
-)
+DATABASE_URL = "sqlite+aiosqlite:///data/waitlist.db"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-@asynccontextmanager
-async def get_session() -> AsyncSession:
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+def _row_to_party(row: Any) -> Party | None:
+    if row is None:
+        return None
+    d = dict(row._mapping)
+    for field in ["created_at", "updated_at", "notified_at", "seated_at", "canceled_at"]:
+        if d.get(field) and isinstance(d[field], str):
+            dt = datetime.fromisoformat(d[field])
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            d[field] = dt
+    # SQLAlchemy Enum type may return the enum member directly or a string
+    status = d.get("status")
+    if isinstance(status, str):
+        d["status"] = PartyStatus(status)
+    elif isinstance(status, PartyStatus):
+        pass  # already correct
+    if isinstance(d.get("id"), str):
+        d["id"] = UUID(d["id"])
+    return Party(**d)
+
+
+def _row_to_table(row: Any) -> Table | None:
+    if row is None:
+        return None
+    d = dict(row._mapping)
+    if d.get("created_at") and isinstance(d["created_at"], str):
+        d["created_at"] = datetime.fromisoformat(d["created_at"])
+    if d.get("occupied_by_party_id") and isinstance(d["occupied_by_party_id"], str):
+        d["occupied_by_party_id"] = UUID(d["occupied_by_party_id"])
+    if isinstance(d.get("id"), str):
+        d["id"] = UUID(d["id"])
+    return Table(**d)
 
 
 class DatabaseStore:
     def __init__(self) -> None:
-        self._parties: dict[UUID, Party] = {}
-        self._tables: dict[UUID, Table] = {}
-        self._action_logs: list[ActionLog] = []
-        self._settings: dict[str, str] = {}
-        self._tokens: dict[str, dict[str, object]] = {}
         self._next_position: int = 1
-        self._memory = MemoryStore()
 
     async def _ensure_tables(self) -> None:
         async with engine.begin() as conn:
@@ -58,7 +67,9 @@ class DatabaseStore:
         urgent: bool = False,
     ) -> Party:
         from nanoid import generate
-        async with get_session() as session:
+
+        session = async_session_maker()
+        try:
             party_id = uuid4()
             token = generate(size=8)
             position = self._next_position
@@ -80,80 +91,70 @@ class DatabaseStore:
             )
             session.add(party)
             await session.flush()
+            await session.commit()
             return party
-
-    async def _row_to_party(self, row) -> Party | None:
-        if row is None:
-            return None
-        d = dict(row._mapping)
-        # Convert string datetime back to datetime objects (make timezone-aware)
-        for field in ["created_at", "updated_at", "notified_at", "seated_at", "canceled_at"]:
-            if d.get(field) and isinstance(d[field], str):
-                dt = datetime.fromisoformat(d[field])
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                d[field] = dt
-        # Convert status string back to enum
-        if isinstance(d.get("status"), str):
-            d["status"] = PartyStatus(d["status"])
-        # Convert id from hex string back to UUID
-        if isinstance(d.get("id"), str):
-            from uuid import UUID
-            d["id"] = UUID(d["id"])
-        return Party(**d)
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def list_parties(self) -> list[Party]:
-        async with get_session() as session:
-            result = await session.execute(
-                text("SELECT * FROM parties ORDER BY position ASC")
-            )
+        session = async_session_maker()
+        try:
+            result = await session.execute(text("SELECT * FROM parties ORDER BY position ASC"))
             rows = result.fetchall()
-            parties = []
-            for row in rows:
-                party = await self._row_to_party(row)
-                if party:
-                    parties.append(party)
-            return sorted(parties, key=lambda p: p.position or 0)
+            return [_row_to_party(r) for r in rows if _row_to_party(r) is not None]  # type: ignore[arg-type]
+        finally:
+            await session.close()
 
     async def get_party(self, party_id: UUID) -> Party | None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM parties WHERE id = '{party_id.hex}'"))
             row = result.fetchone()
-            return await self._row_to_party(row)
+            return _row_to_party(row)
+        finally:
+            await session.close()
 
     async def get_party_by_token(self, token: str) -> Party | None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM parties WHERE token = '{token}'"))
             row = result.fetchone()
-            return await self._row_to_party(row)
+            return _row_to_party(row)
+        finally:
+            await session.close()
 
-    async def update_party(self, party_id: UUID, updates: dict[str, object]) -> Party | None:
-        async with get_session() as session:
+    async def update_party(self, party_id: UUID, updates: dict[str, Any]) -> Party | None:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM parties WHERE id = '{party_id.hex}'"))
             row = result.fetchone()
             if row is None:
                 return None
-            party = await self._row_to_party(row)
+            party = _row_to_party(row)
             if party is None:
                 return None
-            # Apply updates
             for key, value in updates.items():
                 setattr(party, key, value)
             party.updated_at = datetime.now(timezone.utc)
-            # Serialize for database write
+            status_val = party.status.value if isinstance(party.status, PartyStatus) else str(party.status)
             await session.execute(
-                text(f"UPDATE parties SET name=:name, party_size=:party_size, phone=:phone, "
-                     f"email=:email, status=:status, position=:position, estimated_wait=:estimated_wait, "
-                     f"notes=:notes, urgent=:urgent, token=:token, created_at=:created_at, "
-                     f"updated_at=:updated_at, notified_at=:notified_at, seated_at=:seated_at, "
-                     f"canceled_at=:canceled_at WHERE id=:id"),
+                text(
+                    "UPDATE parties SET name=:name, party_size=:party_size, phone=:phone, "
+                    "email=:email, status=:status, position=:position, estimated_wait=:estimated_wait, "
+                    "notes=:notes, urgent=:urgent, token=:token, created_at=:created_at, "
+                    "updated_at=:updated_at, notified_at=:notified_at, seated_at=:seated_at, "
+                    "canceled_at=:canceled_at WHERE id=:id"
+                ),
                 {
                     "id": party_id.hex,
                     "name": party.name,
                     "party_size": party.party_size,
                     "phone": party.phone,
                     "email": party.email,
-                    "status": party.status.value if hasattr(party.status, 'value') else str(party.status),
+                    "status": party.status.value if isinstance(party.status, PartyStatus) else str(party.status),
                     "position": party.position,
                     "estimated_wait": party.estimated_wait,
                     "notes": party.notes,
@@ -164,24 +165,39 @@ class DatabaseStore:
                     "notified_at": party.notified_at.isoformat() if party.notified_at else None,
                     "seated_at": party.seated_at.isoformat() if party.seated_at else None,
                     "canceled_at": party.canceled_at.isoformat() if party.canceled_at else None,
-                }
+                },
             )
+            await session.commit()
             return party
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def delete_party(self, party_id: UUID) -> None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             await session.execute(text(f"DELETE FROM parties WHERE id = '{party_id.hex}'"))
+            await session.commit()
+        finally:
+            await session.close()
 
     async def undo_last_action(self, party_id: UUID) -> Party | None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM parties WHERE id = '{party_id.hex}'"))
             row = result.fetchone()
             if row is None:
                 return None
-            party = await self._row_to_party(row)
-
+            party = _row_to_party(row)
+            if party is None:
+                return None
             logs_result = await session.execute(
-                text(f"SELECT * FROM action_logs WHERE party_id = '{party_id.hex}' ORDER BY created_at DESC LIMIT 1")
+                text(
+                    f"SELECT * FROM action_logs WHERE party_id = '{party_id.hex}' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                )
             )
             log_row = logs_result.fetchone()
             if log_row is None:
@@ -192,12 +208,11 @@ class DatabaseStore:
                 return party
             prev = json.loads(log.previous_state)
             prev["id"] = str(party_id)
-            # Provide default values for fields not stored in snapshot
-            defaults = {
+            defaults: dict[str, Any] = {
                 "party_size": party.party_size,
                 "phone": party.phone,
                 "email": party.email,
-                "status": party.status.value if hasattr(party.status, 'value') else str(party.status),
+                "status": party.status.value if isinstance(party.status, PartyStatus) else str(party.status),
                 "position": party.position,
                 "estimated_wait": party.estimated_wait,
                 "notes": party.notes,
@@ -210,34 +225,33 @@ class DatabaseStore:
                 "canceled_at": party.canceled_at.isoformat() if party.canceled_at else None,
             }
             prev.update(defaults)
-            # Convert status string back to enum
             if isinstance(prev.get("status"), str):
                 prev["status"] = PartyStatus(prev["status"])
             restored = Party(**prev)
-            # Ensure restored.id is a UUID
             if isinstance(restored.id, str):
-                from uuid import UUID
                 restored.id = UUID(restored.id)
-            # Ensure timestamps are datetime objects, not strings
             for field in ["created_at", "updated_at", "notified_at", "seated_at", "canceled_at"]:
                 val = getattr(restored, field, None)
                 if isinstance(val, str):
                     setattr(restored, field, datetime.fromisoformat(val))
-                elif val is None:
-                    setattr(restored, field, now if field in ["created_at", "updated_at"] else None)
+                elif val is None and field in ("created_at", "updated_at"):
+                    setattr(restored, field, datetime.now(timezone.utc))
+            # pyright: ignore[reportOptionalMemberAccess] - restored is guaranteed non-None above
             await session.execute(
-                text(f"UPDATE parties SET name=:name, party_size=:party_size, phone=:phone, "
-                     f"email=:email, status=:status, position=:position, estimated_wait=:estimated_wait, "
-                     f"notes=:notes, urgent=:urgent, token=:token, created_at=:created_at, "
-                     f"updated_at=:updated_at, notified_at=:notified_at, seated_at=:seated_at, "
-                     f"canceled_at=:canceled_at WHERE id=:id"),
+                text(
+                    "UPDATE parties SET name=:name, party_size=:party_size, phone=:phone, "
+                    "email=:email, status=:status, position=:position, estimated_wait=:estimated_wait, "
+                    "notes=:notes, urgent=:urgent, token=:token, created_at=:created_at, "
+                    "updated_at=:updated_at, notified_at=:notified_at, seated_at=:seated_at, "
+                    "canceled_at=:canceled_at WHERE id=:id"
+                ),
                 {
                     "id": restored.id.hex,
                     "name": restored.name,
                     "party_size": restored.party_size,
                     "phone": restored.phone,
                     "email": restored.email,
-                    "status": restored.status.value if hasattr(restored.status, 'value') else str(restored.status),
+                    "status": restored.status.value if isinstance(restored.status, PartyStatus) else str(restored.status),
                     "position": restored.position,
                     "estimated_wait": restored.estimated_wait,
                     "notes": restored.notes,
@@ -248,10 +262,16 @@ class DatabaseStore:
                     "notified_at": restored.notified_at.isoformat() if restored.notified_at else None,
                     "seated_at": restored.seated_at.isoformat() if restored.seated_at else None,
                     "canceled_at": restored.canceled_at.isoformat() if restored.canceled_at else None,
-                }
+                },
             )
             await session.execute(text(f"DELETE FROM action_logs WHERE id = '{log.id}'"))
+            await session.commit()
             return restored
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def add_action_log(
         self,
@@ -261,7 +281,11 @@ class DatabaseStore:
         *,
         created_by: str = "system",
     ) -> ActionLog:
-        snapshot = json.dumps({"id": str(party_id), "name": previous_state.name if previous_state else None}, default=str) if previous_state else None
+        snapshot = (
+            json.dumps({"id": str(party_id), "name": previous_state.name if previous_state else None}, default=str)
+            if previous_state
+            else None
+        )
         log = ActionLog(
             id=uuid4(),
             party_id=party_id.hex,
@@ -269,18 +293,31 @@ class DatabaseStore:
             previous_state=snapshot,
             created_by=created_by,
         )
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             session.add(log)
             await session.flush()
+            await session.commit()
             return log
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def get_action_logs_for_party(self, party_id: UUID) -> list[ActionLog]:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(
-                text(f"SELECT * FROM action_logs WHERE party_id = '{party_id.hex}' ORDER BY created_at DESC")
+                text(
+                    f"SELECT * FROM action_logs WHERE party_id = '{party_id.hex}' "
+                    "ORDER BY created_at DESC"
+                )
             )
             rows = result.fetchall()
             return [ActionLog(**dict(r._mapping)) for r in rows]
+        finally:
+            await session.close()
 
     async def add_table(self, capacity: int, label: str) -> Table:
         table = Table(
@@ -289,52 +326,53 @@ class DatabaseStore:
             label=label,
             is_occupied=False,
         )
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             session.add(table)
             await session.flush()
+            await session.commit()
             return table
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def get_tables(self) -> list[Table]:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text("SELECT * FROM tables"))
             rows = result.fetchall()
-            return [await self._row_to_table(r) for r in rows]
+            return [_row_to_table(r) for r in rows if _row_to_table(r) is not None]  # type: ignore[arg-type]
+        finally:
+            await session.close()
 
     async def get_table(self, table_id: UUID) -> Table | None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM tables WHERE id = '{table_id.hex}'"))
             row = result.fetchone()
-            return await self._row_to_table(row)
+            return _row_to_table(row)
+        finally:
+            await session.close()
 
-    async def _row_to_table(self, row) -> Table | None:
-        if row is None:
-            return None
-        d = dict(row._mapping)
-        if d.get("created_at") and isinstance(d["created_at"], str):
-            d["created_at"] = datetime.fromisoformat(d["created_at"])
-        if d.get("occupied_by_party_id") and isinstance(d["occupied_by_party_id"], str):
-            from uuid import UUID
-            d["occupied_by_party_id"] = UUID(d["occupied_by_party_id"])
-        # Convert id from hex string back to UUID
-        if isinstance(d.get("id"), str):
-            from uuid import UUID
-            d["id"] = UUID(d["id"])
-        return Table(**d)
-
-    async def update_table(self, table_id: UUID, updates: dict[str, object]) -> Table | None:
-        async with get_session() as session:
+    async def update_table(self, table_id: UUID, updates: dict[str, Any]) -> Table | None:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT * FROM tables WHERE id = '{table_id.hex}'"))
             row = result.fetchone()
             if row is None:
                 return None
-            table = await self._row_to_table(row)
+            table = _row_to_table(row)
             if table is None:
                 return None
             for key, value in updates.items():
                 setattr(table, key, value)
             await session.execute(
-                text(f"UPDATE tables SET capacity=:capacity, label=:label, is_occupied=:is_occupied, "
-                     f"occupied_by_party_id=:occupied_by_party_id, created_at=:created_at WHERE id=:id"),
+                text(
+                    "UPDATE tables SET capacity=:capacity, label=:label, is_occupied=:is_occupied, "
+                    "occupied_by_party_id=:occupied_by_party_id, created_at=:created_at WHERE id=:id"
+                ),
                 {
                     "id": table_id.hex,
                     "capacity": table.capacity,
@@ -342,50 +380,78 @@ class DatabaseStore:
                     "is_occupied": table.is_occupied,
                     "occupied_by_party_id": str(table.occupied_by_party_id) if table.occupied_by_party_id else None,
                     "created_at": table.created_at.isoformat() if table.created_at else None,
-                }
+                },
             )
+            await session.commit()
             return table
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def delete_table(self, table_id: UUID) -> None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             await session.execute(text(f"DELETE FROM tables WHERE id = '{table_id.hex}'"))
+            await session.commit()
+        finally:
+            await session.close()
 
     async def set_setting(self, key: str, value: str) -> AppSettings:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             await session.execute(
                 text("INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)"),
-                {"key": key, "value": value}
+                {"key": key, "value": value},
             )
+            await session.commit()
             return AppSettings(key=key, value=value)
+        finally:
+            await session.close()
 
     async def get_setting(self, key: str) -> str | None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT value FROM settings WHERE key = '{key}'"))
             row = result.fetchone()
             return row[0] if row else None
+        finally:
+            await session.close()
 
     async def add_token(self, token: str, scopes: list[str]) -> None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             await session.execute(
                 text("INSERT OR REPLACE INTO auth_tokens (token, scopes) VALUES (:token, :scopes)"),
-                {"token": token, "scopes": json.dumps({"scopes": scopes})}
+                {"token": token, "scopes": json.dumps({"scopes": scopes})},
             )
+            await session.commit()
+        finally:
+            await session.close()
 
     async def remove_token(self, token: str) -> None:
-        async with get_session() as session:
+        session = async_session_maker()
+        try:
             await session.execute(text(f"DELETE FROM auth_tokens WHERE token = '{token}'"))
+            await session.commit()
+        finally:
+            await session.close()
 
-    async def get_token(self, token: str) -> dict[str, object] | None:
-        async with get_session() as session:
+    async def get_token(self, token: str) -> dict[str, Any] | None:
+        session = async_session_maker()
+        try:
             result = await session.execute(text(f"SELECT scopes FROM auth_tokens WHERE token = '{token}'"))
             row = result.fetchone()
             if row is None:
                 return None
             return json.loads(row[0])
+        finally:
+            await session.close()
 
     async def clear(self) -> None:
         async with engine.begin() as conn:
-            await conn.run_sync(lambda c: Base.metadata.drop_all(c))
+            await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         self._next_position = 1
 

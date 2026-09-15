@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
-from app.models import PartyStatus
+from app.models.database import PartyStatus
 from app.schemas import CreatePartyRequest, PartyResponse, TableResponse, UpdatePartyRequest, UpdateTableRequest
 from app.store import store
 
@@ -85,8 +85,8 @@ async def update_party(party_id: str, body: UpdatePartyRequest):
         updates["email"] = body.email
     if body.status is not None:
         new_status = PartyStatus(body.status)
-        if new_status not in VALID_TRANSITIONS.get(party.status, set()):
-            allowed = VALID_TRANSITIONS.get(party.status, set())
+        if new_status not in VALID_TRANSITIONS.get(party.status, set()):  # pyright: ignore[reportArgumentType]
+            allowed = VALID_TRANSITIONS.get(party.status, set())  # pyright: ignore[reportArgumentType]
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid status transition from {party.status.value} to {new_status.value}. Allowed: {[s.value for s in allowed]}",

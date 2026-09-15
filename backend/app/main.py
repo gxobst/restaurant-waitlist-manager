@@ -6,16 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import waitlist, tables, settings, reports
 from app.store import store
+from seed import seed
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await store._ensure_tables()
-    await store.clear()
-    from app.auth.manager import hash_pin
-    await store.set_setting("manager_pin_hash", hash_pin("1234"))
-    await store.set_setting("avg_turnover_time", "30")
-    await store.set_setting("waitlist_paused", "false")
+    await seed()
     yield
 
 

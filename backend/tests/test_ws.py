@@ -46,7 +46,7 @@ def test_broadcast_waitlist_update():
             self.messages.append(text)
 
     mock_client = MockClient()
-    connected_clients.add(mock_client)
+    connected_clients.add(mock_client)  # pyright: ignore[reportArgumentType]
 
     asyncio.run(broadcast_waitlist_update())
 
