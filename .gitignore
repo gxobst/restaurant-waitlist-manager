@@ -7,6 +7,10 @@ venv/
 *.egg-info/
 dist/
 build/
+.python-version
+
+# pytest cache
+.pytest_cache/
 
 # SQLite database
 *.db
@@ -16,6 +20,7 @@ data/
 # Node
 node_modules/
 frontend/dist/
+frontend/.env
 
 # Environment
 .env
