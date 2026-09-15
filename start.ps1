@@ -12,10 +12,6 @@ $logFile = Join-Path $env:TEMP "restaurant-waitlist-manager-$(Get-Date -Format '
 
 $backendPid = $null
 $frontendPid = $null
-$backendLogOut = Join-Path $env:TEMP "backend-out-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-$backendLogErr = Join-Path $env:TEMP "backend-err-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-$frontendLogOut = Join-Path $env:TEMP "frontend-out-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-$frontendLogErr = Join-Path $env:TEMP "frontend-err-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
 function Write-Log {
     param([string]$Message)
@@ -56,11 +52,9 @@ Write-Log "Log file: $logFile"
 
 # Start backend
 Write-Log "Starting backend on port $backendPort..."
-$backendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $backendPort, "--reload" `
+$backendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "uv run uvicorn app.main:app --host 0.0.0.0 --port $backendPort --reload" `
     -WorkingDirectory $backendDir `
-    -PassThru `
-    -WindowStyle Hidden
-
+    -PassThru
 $backendPid = $backendProcess.Id
 Write-Log "Backend started (PID $backendPid)"
 
@@ -95,11 +89,9 @@ if (-not $backendReady) {
 
 # Start frontend
 Write-Log "Starting frontend on port $frontendPort..."
-$frontendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm", "run", "dev" `
+$frontendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm run dev" `
     -WorkingDirectory $frontendDir `
-    -PassThru `
-    -WindowStyle Hidden
-
+    -PassThru
 $frontendPid = $frontendProcess.Id
 Write-Log "Frontend started (PID $frontendPid)"
 
@@ -108,7 +100,6 @@ Write-Log "Services running:"
 Write-Log "  Backend:  http://localhost:$backendPort"
 Write-Log "  Frontend: http://localhost:$frontendPort"
 Write-Log "  Health:   http://localhost:$backendPort/health"
-Write-Log "  Logs:     $backendLogOut, $backendLogErr, $frontendLogOut, $frontendLogErr"
 Write-Log ""
 Write-Log "Press Ctrl+C to stop all services"
 
@@ -117,4 +108,6 @@ try {
     while ($true) { Start-Sleep -Seconds 1 }
 } catch {
     # Ignore
+} finally {
+    Stop-Services
 }
