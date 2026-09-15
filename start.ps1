@@ -35,7 +35,7 @@ $backendReady = $false
 while ($retryCount -lt $maxRetries) {
     Start-Sleep -Seconds 1
     try {
-        $resp = curl -s -m 2 "http://localhost:$backendPort/health"
+        $resp = curl.exe -s -m 2 "http://localhost:$backendPort/health"
         if ($resp -match 'ok') {
             $backendReady = $true
             Write-Log "Backend is ready"
