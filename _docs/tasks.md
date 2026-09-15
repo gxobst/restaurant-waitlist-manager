@@ -753,7 +753,7 @@ Constraints:
 
 # Backend Backlog
 
-## 21. Scaffold FastAPI project with a passing test
+ ✅
 
 Goal: A `backend/` directory exists with a uv-managed Python project, FastAPI app structure, and one passing test.
 
@@ -778,7 +778,7 @@ Constraints:
 
 ---
 
-## 22. Define data models and Pydantic schemas
+ ✅
 
 Goal: All domain entities (Party, Table, ActionLog, Settings) are represented as dataclasses with matching Pydantic schemas for request/response validation.
 
@@ -804,7 +804,7 @@ Constraints:
 
 ---
 
-## 23. Build the in-memory store
+ ✅
 
 Goal: A thread-safe in-memory data store that holds all parties, tables, action logs, settings, and auth tokens, with CRUD operations for each entity.
 
