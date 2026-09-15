@@ -215,12 +215,13 @@ class DatabaseStore:
             if isinstance(restored.id, str):
                 from uuid import UUID
                 restored.id = UUID(restored.id)
-            # Ensure timestamps exist for database write
-            now = datetime.now(timezone.utc)
-            if restored.created_at is None:
-                restored.created_at = now
-            if restored.updated_at is None:
-                restored.updated_at = now
+            # Ensure timestamps are datetime objects, not strings
+            for field in ["created_at", "updated_at", "notified_at", "seated_at", "canceled_at"]:
+                val = getattr(restored, field, None)
+                if isinstance(val, str):
+                    setattr(restored, field, datetime.fromisoformat(val))
+                elif val is None:
+                    setattr(restored, field, now if field in ["created_at", "updated_at"] else None)
             await session.execute(
                 text(f"UPDATE parties SET name=:name, party_size=:party_size, phone=:phone, "
                      f"email=:email, status=:status, position=:position, estimated_wait=:estimated_wait, "
